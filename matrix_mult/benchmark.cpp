@@ -1,6 +1,29 @@
 #include <bits/stdc++.h>
 
+#include <iostream>
+
 #include "ubench.h"
+
+//
+// User settings
+//
+
+const int N = 1920;
+
+//
+// Machine Specific Constants
+//
+
+// User specified
+// Use lscpu
+const int N_PROCS = 6;
+const int L1 = 192000;
+const int L2 = 1572864;
+const int L3 = 9437184;
+
+// Automatically calculated
+const int B = 8;  // number of elements in a vector
+typedef float vec __attribute__((vector_size(4 * B)));
 
 //
 // Utils
@@ -12,8 +35,6 @@ void _fill(float *a, float *b, float *c, const int NN) {
     c[i] = 0;
   }
 }
-
-typedef float vec __attribute__((vector_size(32)));
 
 // a helper function that allocates n vectors and initializes them with zeros
 vec *alloc(int n) {
@@ -39,7 +60,6 @@ void matmul_v0(const float *a, const float *b, float *c, int n) {
 }
 
 UBENCH_EX(matmul, v0) {
-  const int N = 1920;
   float *a = new float[N * N];
   float *b = new float[N * N];
   float *c = new float[N * N];
@@ -65,7 +85,6 @@ void matmul_v1(const float *a, const float *_b, float *c, int n) {
 }
 
 UBENCH_EX(matmul, v1) {
-  const int N = 1920;
   float *a = new float[N * N];
   float *b = new float[N * N];
   float *c = new float[N * N];
@@ -111,7 +130,6 @@ void matmul_v2_manual(const float *_a, const float *_b, float *c, int n) {
 }
 
 UBENCH_EX(matmul, v2_manual) {
-  const int N = 1920;
   float *a = new float[N * N];
   float *b = new float[N * N];
   float *c = new float[N * N];
@@ -138,7 +156,6 @@ void matmul_v2(const float *a, const float *_b, float *__restrict__ c, int n) {
 }
 
 UBENCH_EX(matmul, v2) {
-  const int N = 1920;
   float *a = new float[N * N];
   float *b = new float[N * N];
   float *c = new float[N * N];
@@ -201,7 +218,6 @@ void matmul_v3(const float *_a, const float *_b, float *_c, int n) {
 }
 
 UBENCH_EX(matmul, v3) {
-  const int N = 1920;
   float *a = new float[N * N];
   float *b = new float[N * N];
   float *c = new float[N * N];
@@ -246,6 +262,16 @@ void matmul_v4(const float *_a, const float *_b, float *_c, int n) {
            4 * n);  // we don't need to transpose b this time
   }
 
+  // Dynamically calculated s values
+  // how many columns of b fit in L3
+  // const int s3 = std::min(L3 / nx / 16 * 16, ny);
+  // // how many rows of a fit in L2
+  // const int s2 = std::min(L2 / ny / 6 * 6, nx);
+  // // how tall a (k x s3) block in b can be to fit in L1
+  // const int s1 = std::min(L1 / s3, nx);
+  // std::cout << "S3 " << s3 << "\nS2 " << s2 << "\nS1 " << s1 << std::endl;
+
+  // Original code below:
   const int s3 = 64;   // how many columns of B to select
   const int s2 = 120;  // how many rows of A to select
   const int s1 = 240;  // how many rows of B to select
@@ -268,7 +294,6 @@ void matmul_v4(const float *_a, const float *_b, float *_c, int n) {
 }
 
 UBENCH_EX(matmul, v4) {
-  const int N = 1920;
   float *a = new float[N * N];
   float *b = new float[N * N];
   float *c = new float[N * N];
@@ -276,6 +301,169 @@ UBENCH_EX(matmul, v4) {
   _fill(a, b, c, N * N);
 
   UBENCH_DO_BENCHMARK() { matmul_v4(a, b, c, N); }
+}
+
+//
+// V6 Unrolled
+//
+// c: 6 x 16
+// a: 6 x k
+// b: k x 16
+// c[x:x+6][y:y+16] += a[x:x+6][l:r] * b[l:r][y:y+16]
+
+void kernel_v5(float *a, vec *b, vec *c, int x, int y, int l, int r, int n) {
+  vec t00, t01, t10, t11, t20, t21, t30, t31, t40, t41, t50, t51;
+
+  t00 = c[((x + 0) * n + y) / 8 + 0];
+  t01 = c[((x + 0) * n + y) / 8 + 1];
+
+  t10 = c[((x + 1) * n + y) / 8 + 0];
+  t11 = c[((x + 1) * n + y) / 8 + 1];
+
+  t20 = c[((x + 2) * n + y) / 8 + 0];
+  t21 = c[((x + 2) * n + y) / 8 + 1];
+
+  t30 = c[((x + 3) * n + y) / 8 + 0];
+  t31 = c[((x + 3) * n + y) / 8 + 1];
+
+  t40 = c[((x + 4) * n + y) / 8 + 0];
+  t41 = c[((x + 4) * n + y) / 8 + 1];
+
+  t50 = c[((x + 5) * n + y) / 8 + 0];
+  t51 = c[((x + 5) * n + y) / 8 + 1];
+
+  for (int k = l; k < r; k++) {
+    vec a0 = vec{} + a[(x + 0) * n + k];
+    t00 += a0 * b[(k * n + y) / 8];
+    t01 += a0 * b[(k * n + y) / 8 + 1];
+
+    vec a1 = vec{} + a[(x + 1) * n + k];
+    t10 += a1 * b[(k * n + y) / 8];
+    t11 += a1 * b[(k * n + y) / 8 + 1];
+
+    vec a2 = vec{} + a[(x + 2) * n + k];
+    t20 += a2 * b[(k * n + y) / 8];
+    t21 += a2 * b[(k * n + y) / 8 + 1];
+
+    vec a3 = vec{} + a[(x + 3) * n + k];
+    t30 += a3 * b[(k * n + y) / 8];
+    t31 += a3 * b[(k * n + y) / 8 + 1];
+
+    vec a4 = vec{} + a[(x + 4) * n + k];
+    t40 += a4 * b[(k * n + y) / 8];
+    t41 += a4 * b[(k * n + y) / 8 + 1];
+
+    vec a5 = vec{} + a[(x + 5) * n + k];
+    t50 += a5 * b[(k * n + y) / 8];
+    t51 += a5 * b[(k * n + y) / 8 + 1];
+  }
+
+  c[((x + 0) * n + y) / 8 + 0] = t00;
+  c[((x + 0) * n + y) / 8 + 1] = t01;
+
+  c[((x + 1) * n + y) / 8 + 0] = t10;
+  c[((x + 1) * n + y) / 8 + 1] = t11;
+
+  c[((x + 2) * n + y) / 8 + 0] = t20;
+  c[((x + 2) * n + y) / 8 + 1] = t21;
+
+  c[((x + 3) * n + y) / 8 + 0] = t30;
+  c[((x + 3) * n + y) / 8 + 1] = t31;
+
+  c[((x + 4) * n + y) / 8 + 0] = t40;
+  c[((x + 4) * n + y) / 8 + 1] = t41;
+
+  c[((x + 5) * n + y) / 8 + 0] = t50;
+  c[((x + 5) * n + y) / 8 + 1] = t51;
+}
+
+/*
+const int L1 = (1<<15) / 4; // L1 cache is 32K
+const int L2 = (1<<19) / 4; // L2 cache is 512K
+const int L3 = (1<<23) / 4; // L3 cache is 8M
+*/
+
+void matmul_v5(const float *_a, const float *_b, float *_c, int n) {
+  int nx = (n + 5) / 6 * 6;
+  int ny = (n + 15) / 16 * 16;
+
+  const int MAXN = N * N;  // ~15MB each
+  alignas(64) static float a[MAXN], b[MAXN], c[MAXN];
+
+  /*for (int i = 0; i < n; i++) {
+      memcpy(&a[i * ny], &_a[i * n], 4 * n);
+      memcpy(&b[i * ny], &_b[i * n], 4 * n);
+  }*/
+
+  // c[x:x+6][y:y+16] += a[x:x+6][l:r] * b[l:r][y:y+16]
+
+  // load b[i*L1 : (i+1)*L1][y:y+16] into L1 cache and iterate over a
+  // when out of L2 cache to hold a, load new strip of b and continue
+  // when out of L3 cache to hold b, switch to new segment of a
+
+  // divide b into segments that fit L3, fix a segment
+  // divide a into segments that fit L2, fix a segment
+  // divide b into segments that fit L1, fix a segment
+  // iterate over a
+
+  /*
+  // how many columns of b fit in L3
+  const int s3 = std::min(L3 / nx / 16 * 16, ny);
+  // how many rows of a fit in L2
+  const int s2 = std::min(L2 / ny / 6 * 6, nx);
+  // how tall a (k x s3) block in b can be to fit in L1
+  const int s1 = std::min(L1 / s3, nx);
+  */
+
+  // s3 * nx < L3 (doesn't really matter)
+  // s2 * ny < L2
+  // s1 * s3 < L1
+  // s1 -> max
+
+  // const int s1 = std::min(L1 / 16, nx);
+  // const int s2 = L2 / ny / 6 * 6;
+  // const int s3 = 16;
+
+  const int s3 = 64;
+  const int s2 = 120;
+  const int s1 = 240;
+
+  /*
+  const int u = 96;
+  const int s3 = u;
+  const int s2 = 2 * u;
+  const int s1 = 4 * u;
+  */
+
+  // const int t = L1/s3;
+
+  // 1 252 4032
+  // std::cerr << s1 << " " << s2 << " " << s3 << std::endl;
+
+  for (int i3 = 0; i3 < ny; i3 += s3)
+    // now we are working with b[:][i3:i3+s3]
+    for (int i2 = 0; i2 < nx; i2 += s2)
+      // now we are working with a[i2:i2+s2][:]
+      for (int i1 = 0; i1 < ny; i1 += s1)
+        // now we are working with b[i1:i1+s1][i3:i3+s3]
+        // this equates to updating c[i2:i2+s2][i3:i3+s3]
+        // with [l:r] = [i1:i1+s1]
+        for (int x = i2; x < i2 + s2; x += 6)
+          for (int y = i3; y < i3 + s3; y += 16)
+            kernel_v5(a, (vec *)b, (vec *)c, x, y, i1, i1 + s1, ny);
+
+  // for (int i = 0; i < n; i++)
+  //     memcpy(&_c[i * n], &c[i * ny], 4 * n);
+}
+
+UBENCH_EX(matmul, v5) {
+  float *a = new float[N * N];
+  float *b = new float[N * N];
+  float *c = new float[N * N];
+
+  _fill(a, b, c, N * N);
+
+  UBENCH_DO_BENCHMARK() { matmul_v5(a, b, c, N); }
 }
 
 //

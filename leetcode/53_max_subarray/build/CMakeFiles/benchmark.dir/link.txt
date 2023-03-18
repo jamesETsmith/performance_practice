@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/benchmark.dir/benchmark.cpp.o -o benchmark  libmaxsubarray.a /home/james/projects/performance_practice/benchmark/build/install/lib/libbenchmark.a -lrt 

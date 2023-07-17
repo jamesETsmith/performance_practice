@@ -1,4 +1,5 @@
 #include <iostream>
+#include <omp.h>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -69,6 +70,29 @@ data_dict download_multiple_gather(std::vector<std::string> &urls) {
 
   return final_dd;
 }
+
+class locked_data_dict {
+  data_dict data;
+  omp_lock_t my_lock;
+
+public:
+  locked_data_dict(omp_lock_hint_t hint) {
+    omp_init_lock_with_hint(&my_lock, hint);
+  }
+
+  // void insert(data_dict::key_type key, data_dict::mapped_type val) {
+  //   omp_set_lock(&my_lock);
+  //   data.insert({key, val});
+  //   omp_unset_lock(&my_lock);
+  // }
+
+  data_dict::iterator find(std::string key) {
+    omp_set_lock(&my_lock);
+    auto res = data.find(key);
+    omp_unset_lock(&my_lock);
+    return res;
+  }
+};
 
 /*
  * 1) Serial

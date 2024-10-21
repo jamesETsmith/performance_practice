@@ -1,0 +1,1 @@
+This a sandbox for me to play around with `std::mdspan` and some linear algebra. This implementations are far from perfect or performant.

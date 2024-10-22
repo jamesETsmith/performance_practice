@@ -43,5 +43,5 @@ target_include_directories(
   tensor INTERFACE include ${stdBLAS_BUILD_DIR}/include/experimental)
 
 #
-
+enable_testing()
 add_subdirectory(test)

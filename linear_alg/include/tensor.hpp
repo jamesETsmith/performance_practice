@@ -36,9 +36,12 @@ public:
 
   // Use view
   template <class... SizeTypes>
-  inline T const &operator[](SizeTypes... indices) const {
+  inline T &operator[](SizeTypes... indices) const {
     return __view[std::forward<SizeTypes>(indices)...];
   }
+
+  // Return a view
+  mds_t view() const { return __view; }
 };
 
 #endif

@@ -29,9 +29,22 @@ TEST_CASE("QR") {
   Tensor<double, 2> R(shape);
 
   linalg::qr_mgs(A.view(), Q.view(), R.view());
+  fmt::println("Q = \n{}", Q);
 
   std::vector<double> data_Q_np = {-0.68565218, 0.44836503,  -0.57345434,
                                    -0.1917037,  -0.87120003, -0.45195154,
                                    -0.70223271, -0.19994825, 0.68329344};
   Tensor<double, 2> Q_np(data_Q_np, shape);
+
+  fmt::println("Q_np = \n{}", Q_np);
+
+  std::vector<double> data_R_np = {-0.94854834, -1.20367394, -0.92667055,
+                                   0.,          -0.71336582, -0.31096496,
+                                   0.,          0.,          -0.66727824};
+  Tensor<double, 2> R_np(data_R_np, shape);
+
+  fmt::println("R = \n{}", R);
+
+  CHECK(Q.isclose(Q_np));
+  CHECK(R.isclose(R_np));
 }

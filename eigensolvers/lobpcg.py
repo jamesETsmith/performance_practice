@@ -1,5 +1,8 @@
 import numpy as np
 import scipy as sp
+import pytest
+import torch
+
 
 # Alg 1 in https://crd.lbl.gov/assets/Uploads/ieeetpds-mfdn-lobpcg-rev.pdf
 
@@ -57,71 +60,105 @@ def lobpcg(A: np.ndarray, X: np.ndarray, max_iter: int = 25, tol: float = 1e-5):
         Pi = np.einsum("ia,ab->ib", Si_orth[:, nx:], Ci[nx:, :nx])
 
 
-def batch_lobpcg(A: np.ndarray, X: np.ndarray, max_iter: int = 25, tol: float = 1e-5):
-    nx = X.shape[-1]
+def batch_lobpcg(
+    A: torch.Tensor, X: torch.Tensor, max_iter: int = 50, tol: float = 1e-5
+) -> tuple[torch.Tensor, torch.Tensor]:
     n_batches = X.shape[0]
+    dim = X.shape[1]
+    nx = X.shape[2]
+
+    if nx > dim:
+        raise ValueError(
+            "Number of eigenvectors requested is greater than the dimension of the space"
+        )
 
     # Solve initial rayleigh-ritz
-    Th, C = np.linalg.eigh(np.einsum("tia,tij,tjb->tab", X.conj(), A, X))
+    Th, C = torch.linalg.eigh(torch.einsum("tia,tij,tjb->tab", X.conj(), A, X))
 
     # Rotate the appro eigenvectors
-    Xi = np.einsum("tia,tab->tib", X, C)
+    Xi = torch.einsum("tia,tab->tib", X, C)
 
     # Residuals
-    Ri = np.einsum("tij,tja->tia", A, Xi) - np.einsum("tia,ta->tia", Xi, Th)
+    Ri = torch.einsum("tij,tja->tia", A, Xi) - torch.einsum("tia,ta->tia", Xi, Th)
 
     # Previous approximate eigenvectors
-    Pi = np.zeros_like(Xi)
+    Pi = torch.zeros_like(Xi)
 
     for i in range(max_iter):
         Wi = Ri
-        Si = np.concatenate([Xi, Wi, Pi], axis=2)
-        Si_orth = np.linalg.qr(Si)[0]  # (n_batches, , 3*nx)
+        Si = torch.cat([Xi, Wi, Pi], dim=2)
+        Si_orth = torch.linalg.qr(Si)[0]  # (n_batches, , 3*nx)
 
-        shs = np.einsum("tia,tij,tjb->tab", Si_orth.conj(), A, Si_orth)
-        Thi, Ci = np.linalg.eigh(shs)
+        shs = torch.einsum("tia,tij,tjb->tab", Si_orth.conj(), A, Si_orth)
+        Thi, Ci = torch.linalg.eigh(shs)
 
-        Xi = np.einsum("tia,tab->tib", Si_orth, Ci[:, :, :nx])
-        Ri = A @ Xi - np.einsum("tia,ta->tia", Xi, Thi[:, :nx])
+        Xi = torch.einsum("tia,tab->tib", Si_orth, Ci[:, :, :nx])
+        Ri = A @ Xi - torch.einsum("tia,ta->tia", Xi, Thi[:, :nx])
 
-        if (np.linalg.norm(Ri, axis=(1, 2)) < tol).all():
+        if (torch.linalg.norm(Ri, axis=(1, 2)) < tol).all():
             print(f"Converged in {i} iterations")
             break
 
-        Pi = np.einsum("tia,tab->tib", Si_orth[:, :, nx:], Ci[:, nx:, :nx])
+        Pi = torch.einsum("tia,tab->tib", Si_orth[:, :, nx:], Ci[:, nx:, :nx])
 
     return Thi[:, :nx], Xi
 
 
-np.set_printoptions(linewidth=160)
+@pytest.mark.parametrize("n_batches", [1, 2, 10], ids=lambda x: f"nb={x}")
+@pytest.mark.parametrize("nx", [1, 2, 16], ids=lambda x: f"nx={x}")
+@pytest.mark.parametrize("N", [16, 32, 64, 128, 256], ids=lambda x: f"N={x}")
+def test_batch_lobpcg(n_batches: int, nx: int, N: int) -> None:
+    torch.manual_seed(18)
+    torch.cuda.manual_seed(18)
+    torch.set_default_dtype(torch.float64)
+    # torch.set_default_device(torch.device("cuda"))
 
-# np.random.seed(18)
-# N = 128
-# nx = 10
-# H = np.random.rand(N, N)
-# H = H + H.T
-# psi = np.random.rand(N, nx)
+    H = torch.rand(n_batches, N, N)
+    H = H + H.transpose(2, 1)
+    psi = torch.rand(n_batches, N, nx)
+
+    Thi, Xi = batch_lobpcg(H, psi, max_iter=2 * N, tol=1e-5)
+    S_t, U_t = torch.linalg.eigh(H)
+
+    ev_error = torch.abs(Thi - S_t[:, :nx])
+    print(f"Eigenvalue error {ev_error}")
+    torch.testing.assert_close(Thi, S_t[:, :nx], atol=1e-5, rtol=1e-5)
+
+    fidelity = torch.abs(torch.einsum("tia,tia->ta", Xi.conj(), U_t[:, :, :nx]))
+    print(f"Fidelity of eigenvectors {fidelity}")
+    torch.testing.assert_close(
+        fidelity, torch.ones_like(fidelity), atol=1e-5, rtol=1e-5
+    )
 
 
-# lobpcg(H, psi, max_iter=50)
-# S_t, U_t = np.linalg.eigh(H)
-# print(S_t[:nx])
+if __name__ == "__main__":
+    np.set_printoptions(linewidth=160)
 
+    # np.random.seed(18)
+    # N = 128
+    # nx = 10
+    # H = np.random.rand(N, N)
+    # H = H + H.T
+    # psi = np.random.rand(N, nx)
 
-np.random.seed(18)
-N = 128
-nx = 1
-n_batches = 1
+    # lobpcg(H, psi, max_iter=50)
+    # S_t, U_t = np.linalg.eigh(H)
+    # print(S_t[:nx])
 
-H = np.random.rand(n_batches, N, N)
-H = H + H.transpose(0, 2, 1)
-psi = np.random.rand(n_batches, N, nx)
+    torch.manual_seed(18)
+    N = 128
+    nx = 1
+    n_batches = 10
 
-Thi, Xi = batch_lobpcg(H, psi, max_iter=50)
-S_t, U_t = np.linalg.eigh(H)
+    H = torch.rand(n_batches, N, N)
+    H = H + H.transpose(2, 1)
+    psi = torch.rand(n_batches, N, nx)
 
-print(f"LOBPCG eigenvalues {Thi}")
-print(f"Eigenvalues {S_t[:,:nx]}")
+    Thi, Xi = batch_lobpcg(H, psi, max_iter=50)
+    S_t, U_t = torch.linalg.eigh(H)
 
-fidelity = np.abs(np.einsum("tia,tia->t", Xi, U_t[:, :, :nx]))
-print(f"Fidelity of eigenvectors {fidelity}")
+    print(f"LOBPCG eigenvalues {Thi}")
+    print(f"Eigenvalues {S_t[:,:nx]}")
+
+    fidelity = torch.abs(torch.einsum("tia,tia->t", Xi, U_t[:, :, :nx]))
+    print(f"Fidelity of eigenvectors {fidelity}")

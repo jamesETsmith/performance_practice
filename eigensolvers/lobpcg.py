@@ -2,6 +2,7 @@ import numpy as np
 import scipy as sp
 import pytest
 import torch
+from typing import Callable
 
 
 # Alg 1 in https://crd.lbl.gov/assets/Uploads/ieeetpds-mfdn-lobpcg-rev.pdf
@@ -93,7 +94,9 @@ def batch_lobpcg(
         Thi, Ci = torch.linalg.eigh(shs)
 
         Xi = torch.einsum("tia,tab->tib", Si_orth, Ci[:, :, :nx])
-        Ri = A @ Xi - torch.einsum("tia,ta->tia", Xi, Thi[:, :nx])
+        Ri = torch.einsum("tij,tja->tia", A, Xi) - torch.einsum(
+            "tia,ta->tia", Xi, Thi[:, :nx]
+        )
 
         if (torch.linalg.norm(Ri, axis=(1, 2)) < tol).all():
             print(f"Converged in {i} iterations")
@@ -102,6 +105,23 @@ def batch_lobpcg(
         Pi = torch.einsum("tia,tab->tib", Si_orth[:, :, nx:], Ci[:, nx:, :nx])
 
     return Thi[:, :nx], Xi
+
+
+class BatchLinearOperator:
+    def __init__(
+        self,
+        shape: tuple[int, int],
+        matvec: Callable[[torch.Tensor], torch.Tensor] = None,
+        matmat: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        dtype: torch.dtype = None,
+    ):
+        if matvec is None and matmat is None:
+            raise ValueError("Either matvec or matmat must be provided")
+
+        self.shape = shape
+        self.matvec = matvec
+        self.matmat = matmat
+        self.dtype = dtype
 
 
 @pytest.mark.parametrize("n_batches", [1, 2, 10], ids=lambda x: f"nb={x}")

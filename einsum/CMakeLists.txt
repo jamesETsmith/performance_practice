@@ -6,6 +6,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS
 
 include(cmake/CPM.cmake)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS
+    TRUE
+    CACHE BOOL "Export compile commands to build directory" FORCE)
+
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,9 +43,12 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3")
 
 # Main library
 add_library(einsum INTERFACE)
-target_link_libraries(einsum INTERFACE fmt::fmt std::linalg mdspan)
+target_link_libraries(einsum INTERFACE std::linalg fmt::fmt mdspan)
 target_include_directories(
-  einsum INTERFACE include ${stdBLAS_BUILD_DIR}/include/experimental)
+  einsum INTERFACE
+  include
+  ${stdBLAS_BINARY_DIR}/include/experimental
+)
 
 # Enable testing
 enable_testing()

@@ -37,7 +37,7 @@ void correlate(int ny, int nx, const float *data, float *result) {
   int na = (nx + nb - 1) / nb;
 
   // size of blocks that we'll update in output
-  int constexpr nd = 2;
+  int constexpr nd = 3;
   // number of blocks we'll need for each column
   int nc = (ny + nd - 1) / nd;
   // Number of rows after padding
@@ -82,25 +82,31 @@ void correlate(int ny, int nx, const float *data, float *result) {
   }
 
   // compute XX^T
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for
   for (int jc = 0; jc < nc; ++jc) {
     for (int ic = jc; ic < nc; ++ic) {
 
-      std::vector<std::vector<double4_t>> vv(
-          ncd, std::vector<double4_t>(ncd, d4zero));
+      std::array<std::array<double4_t, nd>, nd> vv = {d4zero};
 
       for (int ka = 0; ka < na; ++ka) {
         // indices are a mess here
         // (unpacked row idx) * na + vector idx
         double4_t x0 = X[(jc * nd + 0) * na + ka];
         double4_t x1 = X[(jc * nd + 1) * na + ka];
+        double4_t x2 = X[(jc * nd + 2) * na + ka];
         double4_t y0 = X[(ic * nd + 0) * na + ka];
         double4_t y1 = X[(ic * nd + 1) * na + ka];
+        double4_t y2 = X[(ic * nd + 2) * na + ka];
 
         vv[0][0] += x0 * y0;
         vv[0][1] += x0 * y1;
+        vv[0][2] += x0 * y2;
         vv[1][0] += x1 * y0;
         vv[1][1] += x1 * y1;
+        vv[1][2] += x1 * y2;
+        vv[2][0] += x2 * y0;
+        vv[2][1] += x2 * y1;
+        vv[2][2] += x2 * y2;
       }
 
       // reduce vv and store in result

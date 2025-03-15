@@ -9,9 +9,11 @@ This is the function you need to implement. Quick reference:
 #include <cmath>
 #include <vector>
 void correlate(int ny, int nx, const float *data, float *result) {
-  // standardize the rows (set the mean to 0 and std to 1)
+  // All arithmetic must be in double precision per the problem instructions
+  // online
   std::vector<double> X(ny * nx, 0);
 
+  // standardize the rows (set the mean to 0 and std to 1)
   for (int y = 0; y < ny; y++) {
     double mean = 0;
     for (int x = 0; x < nx; x++) {
@@ -30,6 +32,7 @@ void correlate(int ny, int nx, const float *data, float *result) {
       X[x + y * nx] = (data[x + y * nx] - mean) / std;
     }
   }
+
   // normalize the rows
   for (int y = 0; y < ny; y++) {
     double sum = 0;

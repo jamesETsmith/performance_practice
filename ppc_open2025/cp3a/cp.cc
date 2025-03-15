@@ -24,14 +24,6 @@ static inline double reduce_sqrt(double4_t x) {
   return sqrt(result);
 }
 
-static inline double hdot4(double4_t a, double4_t b) {
-  double result = 0;
-  for (int i = 0; i < 4; i++) {
-    result += a[i] * b[i];
-  }
-  return result;
-}
-
 void correlate(int ny, int nx, const float *data, float *result) {
   int na = (nx + nb - 1) / nb;
   std::vector<double4_t> X(ny * na, d4zero);
@@ -73,20 +65,25 @@ void correlate(int ny, int nx, const float *data, float *result) {
   }
 
   // compute XX^T
-#pragma omp parallel for collapse(2)
+#pragma omp parallel for schedule(static)
   for (int j = 0; j < ny; ++j) {
     for (int i = j; i < ny; ++i) {
 
       // Break up the inner product into a sum of nb smaller inner products
-      double res = 0;
+      double4_t res = d4zero;
 
       // Iterate over blocks of nb size
       for (int xa = 0; xa < na; ++xa) {
         // iterate over the block
-        res += hdot4(X[xa + i * na], X[xa + j * na]);
+        res += X[xa + i * na] * X[xa + j * na];
       }
 
-      result[i + j * ny] = res;
+      double res_scalar = 0;
+      for (int xb = 0; xb < nb; ++xb) {
+        res_scalar += res[xb];
+      }
+
+      result[i + j * ny] = res_scalar;
     }
   }
 }

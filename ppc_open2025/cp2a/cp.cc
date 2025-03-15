@@ -8,7 +8,7 @@ This is the function you need to implement. Quick reference:
 */
 #include <array>
 #include <cmath>
-#include <iostream>
+#include <numeric>
 #include <vector>
 
 void correlate(int ny, int nx, const float *data, float *result) {
@@ -16,7 +16,7 @@ void correlate(int ny, int nx, const float *data, float *result) {
   // online
 
   // pad X to a block size of 4
-  int constexpr nb = 4;
+  int constexpr nb = 8;
   int na = (nx + nb - 1) / nb;
   int nx_padded = na * nb;
 
@@ -70,11 +70,7 @@ void correlate(int ny, int nx, const float *data, float *result) {
         }
       }
 
-      double res = 0;
-      for (int xb = 0; xb < nb; ++xb) {
-        res += accum[xb];
-      }
-
+      double res = std::reduce(accum.begin(), accum.end());
       result[i + j * ny] = res;
     }
   }

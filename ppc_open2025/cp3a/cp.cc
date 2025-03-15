@@ -11,7 +11,7 @@ This is the function you need to implement. Quick reference:
 #include <numeric>
 #include <vector>
 
-int constexpr nb = 4; // size of block
+int constexpr nb = 4; // size of vector
 using double4_t = double __attribute__((vector_size(nb * sizeof(double))));
 
 constexpr double4_t d4zero = {0, 0, 0, 0};
@@ -24,9 +24,26 @@ static inline double reduce_sqrt(double4_t x) {
   return sqrt(result);
 }
 
+static inline double reduce_d4t(double4_t x) {
+  double result = 0;
+  for (int i = 0; i < 4; i++) {
+    result += x[i];
+  }
+  return result;
+}
+
 void correlate(int ny, int nx, const float *data, float *result) {
+  // Calculate the number of vectors we'll need for each row
   int na = (nx + nb - 1) / nb;
-  std::vector<double4_t> X(ny * na, d4zero);
+
+  // size of blocks that we'll update in output
+  int constexpr nd = 2;
+  // number of blocks we'll need for each column
+  int nc = (ny + nd - 1) / nd;
+  // Number of rows after padding
+  int ncd = nc * nd;
+
+  std::vector<double4_t> X(ncd * na, d4zero);
 
 // standardize the rows (set the mean to 0 and std to 1)
 #pragma omp parallel for
@@ -66,24 +83,37 @@ void correlate(int ny, int nx, const float *data, float *result) {
 
   // compute XX^T
 #pragma omp parallel for schedule(static)
-  for (int j = 0; j < ny; ++j) {
-    for (int i = j; i < ny; ++i) {
+  for (int jc = 0; jc < nc; ++jc) {
+    for (int ic = jc; ic < nc; ++ic) {
 
-      // Break up the inner product into a sum of nb smaller inner products
-      double4_t res = d4zero;
+      std::vector<std::vector<double4_t>> vv(
+          ncd, std::vector<double4_t>(ncd, d4zero));
 
-      // Iterate over blocks of nb size
-      for (int xa = 0; xa < na; ++xa) {
-        // iterate over the block
-        res += X[xa + i * na] * X[xa + j * na];
+      for (int ka = 0; ka < na; ++ka) {
+        // indices are a mess here
+        // (unpacked row idx) * na + vector idx
+        double4_t x0 = X[(jc * nd + 0) * na + ka];
+        double4_t x1 = X[(jc * nd + 1) * na + ka];
+        double4_t y0 = X[(ic * nd + 0) * na + ka];
+        double4_t y1 = X[(ic * nd + 1) * na + ka];
+
+        vv[0][0] += x0 * y0;
+        vv[0][1] += x0 * y1;
+        vv[1][0] += x1 * y0;
+        vv[1][1] += x1 * y1;
       }
 
-      double res_scalar = 0;
-      for (int xb = 0; xb < nb; ++xb) {
-        res_scalar += res[xb];
-      }
+      // reduce vv and store in result
+      for (int id = 0; id < nd; ++id) {
+        for (int jd = 0; jd < nd; ++jd) {
+          int i = ic * nd + id;
+          int j = jc * nd + jd;
 
-      result[i + j * ny] = res_scalar;
+          if (i < ny && j < ny) {
+            result[i + j * ny] = reduce_d4t(vv[jd][id]);
+          }
+        }
+      }
     }
   }
 }

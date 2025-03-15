@@ -82,7 +82,7 @@ void correlate(int ny, int nx, const float *data, float *result) {
   }
 
   // compute XX^T
-#pragma omp parallel for
+#pragma omp parallel for schedule(dynamic)
   for (int jc = 0; jc < nc; ++jc) {
     for (int ic = jc; ic < nc; ++ic) {
 

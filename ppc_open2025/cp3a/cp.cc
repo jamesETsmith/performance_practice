@@ -8,7 +8,6 @@ This is the function you need to implement. Quick reference:
 */
 #include <array>
 #include <cmath>
-#include <numeric>
 #include <vector>
 
 //
@@ -22,7 +21,7 @@ int constexpr nd = 8; // size of blocks that we'll update in output
 //
 using double4_t = double __attribute__((vector_size(nb * sizeof(double))));
 
-constexpr double4_t d4zero = {0, 0, 0, 0};
+constexpr double4_t d4zero = {0};
 
 //
 // Helper functions
@@ -65,7 +64,8 @@ void correlate(int ny, int nx, const float *data, float *result) {
     mean /= nx;
     double std = 0;
     for (int x = 0; x < nx; x++) {
-      std += (data[x + y * nx] - mean) * (data[x + y * nx] - mean);
+      double tmp = data[x + y * nx] - mean;
+      std += tmp * tmp;
     }
     // Use the population standard deviation because we are using the entire
     // dataset
@@ -86,10 +86,7 @@ void correlate(int ny, int nx, const float *data, float *result) {
     double norm = reduce_sqrt(sum);
     double4_t norm_vec = {norm, norm, norm, norm};
     for (int xa = 0; xa < na; ++xa) {
-
-      for (int xb = 0; xb < nb; ++xb) {
-        X[xa + y * na][xb] /= norm;
-      }
+      X[xa + y * na] /= norm_vec;
     }
   }
 

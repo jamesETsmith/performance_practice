@@ -150,8 +150,8 @@ void correlate(int ny, int nx, const float *data, float *result) {
         }
 
         // reduce vv and store in result
-        for (int id = 0; id < nd; ++id) {
-          for (int jd = 0; jd < nd; ++jd) {
+        for (int jd = 0; jd < nd; ++jd) {
+          for (int id = 0; id < nd; ++id) {
             int i = ic * nd + id;
             int j = jc * nd + jd;
 

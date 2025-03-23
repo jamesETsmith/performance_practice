@@ -8,8 +8,9 @@ This is the function you need to implement. Quick reference:
 */
 #include <array>
 #include <cmath>
+#include <cstring>
+#include <immintrin.h>
 #include <vector>
-
 //
 // User defined constants
 //
@@ -42,7 +43,117 @@ static inline double reduce_d4t(double4_t x) {
   return result;
 }
 
+/*
+Calculate
+*/
+// void kernel(doubl)
+
 void correlate(int ny, int nx, const float *data, float *result) {
+
+  // copy the data to padded vector array
+  // std::vector<double4_t> X(ncd * na, d4zero);
+  std::vector<double> X(ny * nx, 0);
+
+  // standardize the rows (set the mean to 0 and std to 1)
+#pragma omp parallel for
+  for (int y = 0; y < ny; y++) {
+    double mean = 0;
+    for (int x = 0; x < nx; x++) {
+      mean += data[x + y * nx];
+    }
+    mean /= nx;
+    double std = 0;
+    for (int x = 0; x < nx; x++) {
+      std += (data[x + y * nx] - mean) * (data[x + y * nx] - mean);
+    }
+    // Use the population standard deviation because we are using the entire
+    // dataset
+    std = sqrt(std / nx);
+
+    for (int x = 0; x < nx; x++) {
+      X[x + y * nx] = (data[x + y * nx] - mean) / std;
+    }
+  }
+
+  // normalize the rows
+  for (int y = 0; y < ny; y++) {
+    double sum = 0;
+    for (int x = 0; x < nx; x++) {
+      sum += X[x + y * nx] * X[x + y * nx];
+    }
+    double norm = sqrt(sum);
+    for (int x = 0; x < nx; x++) {
+      X[x + y * nx] /= norm;
+    }
+  }
+
+  // Number of padded columns
+  int const nc = (ny + nb - 1) / nb;
+
+  // Row-major vectorized padded matrix
+  std::vector<double4_t> Xt(nc * nb * nx, d4zero);
+
+  // Copy the data to the padded matrix
+#pragma omp parallel for collapse(2)
+  for (int y = 0; y < ny; y++) {
+    for (int x = 0; x < nx; x++) {
+      Xt[x / nb + y * nc][x % nb] = X[x + y * nx];
+    }
+  }
+
+  // compute XX^T
+  // C_ij = sum_k X_ik * X_jk
+  int constexpr bj = 256;
+  int constexpr bi = 32;
+  int constexpr bk = 16;
+
+  std::vector<double> C(ny * ny, 0);
+  // memset(result, 0, ny * ny * sizeof(float));
+
+  // Loop over tiles
+#pragma omp parallel for schedule(dynamic)
+  for (int j = 0; j < ny; j += bj) {
+    for (int k = 0; k < nx; k += bk) {
+      for (int i = j; i < ny; i += bi) {
+
+        // loop over the elements of the tile
+        for (int jj = j; jj < std::min(j + bj, ny); ++jj) {
+          for (int ii = i; ii < std::min(i + bi, ny); ++ii) {
+
+            double4_t res4 = d4zero;
+            for (int kk = k; kk < std::min(k + bk, nx); kk += nb) {
+              double4_t x1 = d4zero;
+              double4_t x2 = d4zero;
+              for (int vkk = 0; vkk < std::min(nb, nx - kk); ++vkk) {
+                x1[vkk] = X[kk + vkk + ii * nx];
+                x2[vkk] = X[kk + vkk + jj * nx];
+              }
+              res4 = _mm256_fmadd_pd(x1, x2, res4);
+            }
+            double res = reduce_d4t(res4);
+            C[ii + jj * ny] += res;
+
+            // double res = 0;
+            // for (int kk = k; kk < std::min(k + bk, nx); ++kk) {
+            //   res += X[kk + ii * nx] * X[kk + jj * nx];
+            // }
+            // C[ii + jj * ny] += res;
+          }
+        }
+      }
+    }
+  }
+
+  // copy the result to the output
+#pragma omp parallel for schedule(dynamic)
+  for (int j = 0; j < ny; j++) {
+    for (int i = j; i < ny; i++) {
+      result[i + j * ny] = C[i + j * ny];
+    }
+  }
+}
+
+void correlate_vec_register(int ny, int nx, const float *data, float *result) {
   // Calculate the number of vectors we'll need for each row
   int na = (nx + nb - 1) / nb;
 

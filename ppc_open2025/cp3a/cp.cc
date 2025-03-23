@@ -44,9 +44,31 @@ static inline double reduce_d4t(double4_t x) {
 }
 
 /*
-Calculate
+// update 6x16 submatrix C[x:x+6][y:y+16]
+// using A[x:x+6][l:r] and B[l:r][y:y+16]
 */
-// void kernel(doubl)
+void kernel(float *result, double const *X, int _x, int _y, int const nx,
+            int const ny) {
+  // double4_t C[6][4]{}; // zero filled and stored in ymm registers
+  double C[6][16]{};
+
+  for (int x = _x; x < std::min(ny, _x + 6); ++x) {
+    for (int y = _y; y < std::min(ny, _y + 16); ++y) {
+
+      // Always doing the whole row
+      for (int k = 0; k < nx; ++k) {
+        C[x - _x][y - _y] += X[k + x * nx] * X[k + y * nx];
+      }
+    }
+  }
+
+  // copy C to the results
+  for (int x = _x; x < std::min(ny, _x + 6); ++x) {
+    for (int y = _y; y < std::min(ny, _y + 16); ++y) {
+      result[x + y * ny] = C[x - _x][y - _y];
+    }
+  }
+}
 
 void correlate(int ny, int nx, const float *data, float *result) {
 
@@ -87,68 +109,26 @@ void correlate(int ny, int nx, const float *data, float *result) {
     }
   }
 
-  // Number of padded columns
-  int const nc = (ny + nb - 1) / nb;
+//   // Number of padded columns
+//   int const nc = (ny + nb - 1) / nb;
 
-  // Row-major vectorized padded matrix
-  std::vector<double4_t> Xt(nc * nb * nx, d4zero);
+//   // Row-major vectorized padded matrix
+//   std::vector<double4_t> Xt(nc * nb * nx, d4zero);
 
-  // Copy the data to the padded matrix
-#pragma omp parallel for collapse(2)
-  for (int y = 0; y < ny; y++) {
-    for (int x = 0; x < nx; x++) {
-      Xt[x / nb + y * nc][x % nb] = X[x + y * nx];
-    }
-  }
+//   // Copy the data to the padded matrix
+// #pragma omp parallel for collapse(2)
+//   for (int y = 0; y < ny; y++) {
+//     for (int x = 0; x < nx; x++) {
+//       Xt[x / nb + y * nc][x % nb] = X[x + y * nx];
+//     }
+//   }
 
-  // compute XX^T
-  // C_ij = sum_k X_ik * X_jk
-  int constexpr bj = 256;
-  int constexpr bi = 32;
-  int constexpr bk = 16;
-
-  std::vector<double> C(ny * ny, 0);
-  // memset(result, 0, ny * ny * sizeof(float));
-
-  // Loop over tiles
+// compute XX^T
+// C_ij = sum_k X_ik * X_jk
 #pragma omp parallel for schedule(dynamic)
-  for (int j = 0; j < ny; j += bj) {
-    for (int k = 0; k < nx; k += bk) {
-      for (int i = j; i < ny; i += bi) {
-
-        // loop over the elements of the tile
-        for (int jj = j; jj < std::min(j + bj, ny); ++jj) {
-          for (int ii = i; ii < std::min(i + bi, ny); ++ii) {
-
-            double4_t res4 = d4zero;
-            for (int kk = k; kk < std::min(k + bk, nx); kk += nb) {
-              double4_t x1 = d4zero;
-              double4_t x2 = d4zero;
-              for (int vkk = 0; vkk < std::min(nb, nx - kk); ++vkk) {
-                x1[vkk] = X[kk + vkk + ii * nx];
-                x2[vkk] = X[kk + vkk + jj * nx];
-              }
-              res4 = _mm256_fmadd_pd(x1, x2, res4);
-            }
-            double res = reduce_d4t(res4);
-            C[ii + jj * ny] += res;
-
-            // double res = 0;
-            // for (int kk = k; kk < std::min(k + bk, nx); ++kk) {
-            //   res += X[kk + ii * nx] * X[kk + jj * nx];
-            // }
-            // C[ii + jj * ny] += res;
-          }
-        }
-      }
-    }
-  }
-
-  // copy the result to the output
-#pragma omp parallel for schedule(dynamic)
-  for (int j = 0; j < ny; j++) {
-    for (int i = j; i < ny; i++) {
-      result[i + j * ny] = C[i + j * ny];
+  for (int j = 0; j < ny; j += 16) {
+    for (int i = j; i < ny; i += 6) {
+      kernel(result, X.data(), i, j, nx, ny);
     }
   }
 }

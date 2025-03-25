@@ -17,7 +17,7 @@ This is the function you need to implement. Quick reference:
 //
 int constexpr nv = 4;
 
-int constexpr nr = 8;
+int constexpr nr = 4; // right now we make this same size as our vector
 int constexpr nc = 4;
 
 int constexpr jblock = nc * 10;
@@ -62,7 +62,7 @@ void kernel(double *result, double const *X, int _x, int _y, int const k0,
             int const nx, int const ny) {
 
   // C[nc][nr] make it column-major
-  double C[nc][nr]{};
+  __m256d C[nr]{};
 
   int const kend = std::min(k0 + kblock, nx);
 
@@ -88,18 +88,32 @@ void kernel(double *result, double const *X, int _x, int _y, int const k0,
 
   // compute C[nr][nc] = A[nr][kblock] * B[kblock][nc]
   // using rank-1 updates
+  __m256d a_col;
+  __m256d b_col;
+  // __m256d c_col;
+
   for (int k = 0; k < kblock; ++k) {
-    for (int i = 0; i < nr; ++i) {
-      for (int j = 0; j < nc; ++j) {
-        C[j][i] += A[k][i] * B[k][j];
-      }
+    a_col = _mm256_loadu_pd(&A[k][0]);
+    // c_col = _mm256_setzero_pd();
+    for (int j = 0; j < nc; ++j) {
+      b_col = _mm256_broadcast_sd(&B[k][j]);
+      C[j] = _mm256_fmadd_pd(a_col, b_col, C[j]);
     }
+    // _mm256_store_pd(&C[j][0], c_col);
   }
 
   // store C
+  // for (int j = 0; j < std::min(nc, ny - _y); ++j) {
+  //   for (int i = 0; i < std::min(nr, ny - _x); ++i) {
+  //     result[(_x + i) + (_y + j) * ny] += C[j][i];
+  //   }
+  //   // _mm256_storeu_pd(&result[_x + (_y + j) * ny], C[j]);
+  // }
+  double temp[4] = {};
   for (int j = 0; j < std::min(nc, ny - _y); ++j) {
+    _mm256_storeu_pd(temp, C[j]);
     for (int i = 0; i < std::min(nr, ny - _x); ++i) {
-      result[(_x + i) + (_y + j) * ny] += C[j][i];
+      result[(_x + i) + (_y + j) * ny] += temp[i];
     }
   }
 

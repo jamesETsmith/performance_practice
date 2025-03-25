@@ -7,6 +7,7 @@ This is the function you need to implement. Quick reference:
 - only parts with 0 <= j <= i < ny need to be filled
 */
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <immintrin.h>
@@ -14,13 +15,22 @@ This is the function you need to implement. Quick reference:
 //
 // User defined constants
 //
-int constexpr nb = 4; // size of vector
-int constexpr nd = 8; // size of blocks that we'll update in output
+int constexpr nv = 4;
+
+int constexpr nr = 8;
+int constexpr nc = 4;
+
+int constexpr jblock = nc * 10;
+int constexpr iblock = nr * 32;
+int constexpr kblock = 32;
+
+static_assert(iblock % 4 == 0);
+static_assert(jblock % 4 == 0);
 
 //
 // User defined types
 //
-using double4_t = double __attribute__((vector_size(nb * sizeof(double))));
+using double4_t = double __attribute__((vector_size(nv * sizeof(double))));
 
 constexpr double4_t d4zero = {0};
 
@@ -47,27 +57,73 @@ static inline double reduce_d4t(double4_t x) {
 // update 6x16 submatrix C[x:x+6][y:y+16]
 // using A[x:x+6][l:r] and B[l:r][y:y+16]
 */
+template <int nr, int nc, int kblock>
 void kernel(double *result, double const *X, int _x, int _y, int const k0,
-            int const kend, int const nx, int const ny) {
-  alignas(64) double C[6][16]{};
+            int const nx, int const ny) {
 
-  for (int x = _x; x < std::min(ny, _x + 6); ++x) {
-    for (int y = _y; y < std::min(ny, _y + 16); ++y) {
+  // C[nc][nr] make it column-major
+  double C[nc][nr]{};
 
-      // Do a chunk of the row
-      for (int k = k0; k < kend; ++k) {
-        C[x - _x][y - _y] += X[k + x * nx] * X[k + y * nx];
+  int const kend = std::min(k0 + kblock, nx);
+
+  // create A[kblock][nr] so it's column-major
+  double A[kblock][nr]{};
+
+  // load A
+  for (int x = 0; x < std::min(nr, ny - _x); ++x) {
+    for (int k = k0; k < kend; ++k) {
+      A[k - k0][x] = X[k + (_x + x) * nx];
+    }
+  }
+
+  // create B[kblock][nc]
+  double B[kblock][nc]{};
+
+  // load B
+  for (int k = k0; k < kend; ++k) {
+    for (int y = 0; y < std::min(nc, ny - _y); ++y) {
+      B[k - k0][y] = X[k + (_y + y) * nx];
+    }
+  }
+
+  // compute C[nr][nc] = A[nr][kblock] * B[kblock][nc]
+  // using rank-1 updates
+  for (int k = 0; k < kblock; ++k) {
+    for (int i = 0; i < nr; ++i) {
+      for (int j = 0; j < nc; ++j) {
+        C[j][i] += A[k][i] * B[k][j];
       }
     }
   }
 
-  // copy C to the results
-  for (int x = _x; x < std::min(ny, _x + 6); ++x) {
-    for (int y = _y; y < std::min(ny, _y + 16); ++y) {
-      result[x + y * ny] += C[x - _x][y - _y];
+  // store C
+  for (int j = 0; j < std::min(nc, ny - _y); ++j) {
+    for (int i = 0; i < std::min(nr, ny - _x); ++i) {
+      result[(_x + i) + (_y + j) * ny] += C[j][i];
     }
   }
+
+  // for (int x = _x; x < std::min(ny, _x + nr); ++x) {
+
+  //   for (int y = _y; y < std::min(ny, _y + nc); ++y) {
+
+  //     // Do a chunk of the row
+  //     for (int k = k0; k < kend; ++k) {
+  //       C[x - _x][y - _y] += X[k + x * nx] * X[k + y * nx];
+  //     }
+  //   }
+  // }
+
+  // // copy C to the results
+  // for (int x = _x; x < std::min(ny, _x + nr); ++x) {
+  //   for (int y = _y; y < std::min(ny, _y + nc); ++y) {
+  //     result[x + y * ny] += C[x - _x][y - _y];
+  //   }
+  // }
 }
+
+// void kernel_v2(double *result, double4_t *X1, double4_t *X2, int x1, int y1,
+//                int x2, int y2, int k0, int kend) {}
 
 void correlate(int ny, int nx, const float *data, float *result) {
 
@@ -79,30 +135,35 @@ void correlate(int ny, int nx, const float *data, float *result) {
 #pragma omp parallel for
   for (int y = 0; y < ny; y++) {
     double mean = 0;
+#pragma omp simd reduction(+ : mean)
     for (int x = 0; x < nx; x++) {
       mean += data[x + y * nx];
     }
     mean /= nx;
     double std = 0;
+#pragma omp simd reduction(+ : std)
     for (int x = 0; x < nx; x++) {
       std += (data[x + y * nx] - mean) * (data[x + y * nx] - mean);
     }
     // Use the population standard deviation because we are using the entire
     // dataset
     std = sqrt(std / nx);
-
+#pragma omp simd
     for (int x = 0; x < nx; x++) {
       X[x + y * nx] = (data[x + y * nx] - mean) / std;
     }
   }
 
   // normalize the rows
+#pragma omp parallel for
   for (int y = 0; y < ny; y++) {
     double sum = 0;
+#pragma omp simd reduction(+ : sum)
     for (int x = 0; x < nx; x++) {
       sum += X[x + y * nx] * X[x + y * nx];
     }
     double norm = sqrt(sum);
+#pragma omp simd
     for (int x = 0; x < nx; x++) {
       X[x + y * nx] /= norm;
     }
@@ -124,37 +185,48 @@ void correlate(int ny, int nx, const float *data, float *result) {
   //   }
 
   // block loop over j
-  int const nr = 6;
-  int const nc = 16;
 
-  int const jblock = nc * 10;
-  int const iblock = nr * 10;
-  int const kblock = 64;
+  // double4_t X1[iblock / 4][kblock]{}, X2[jblock / 4][kblock]{};
 
 // break up the X_jk into blocks of rows
 #pragma omp parallel for schedule(dynamic)
   for (int j = 0; j < ny; j += jblock) {
-    // break up X_jk_block into blocks of columns
-    for (int k = 0; k < nx; k += kblock) {
-      int const kend = std::min(k + kblock, nx);
 
-      // break X_ik_block into blocks of rows
-      for (int i = j; i < ny; i += iblock) {
+    // break X_ik_block into blocks of rows
+    for (int i = j; i < ny; i += iblock) {
+
+      // break up X_jk_block into blocks of columns
+      for (int k = 0; k < nx; k += kblock) {
 
         // move the C_ij_block throughout the blocks
         for (int jj = j; jj < std::min(ny, j + jblock); jj += nc) {
           for (int ii = i; ii < std::min(ny, i + iblock); ii += nr) {
-            kernel(result_d.data(), X.data(), ii, jj, k, kend, nx, ny);
+            kernel<nr, nc, kblock>(result_d.data(), X.data(), ii, jj, k, nx,
+                                   ny);
+            // kernel(result, X.data(), ii, jj, k, kend, nx, ny);
           }
         }
       }
     }
   }
 
+#pragma omp parallel for simd
   for (int i = 0; i < ny * ny; i++) {
     result[i] = result_d[i];
   }
 }
+
+// template <int iblock, int kblock>
+// void pack_X1(double4_t *X1, double const *X, int const _x, int const _y,
+//              int const k0, int const kend, int const nx, int const ny) {
+//   for (int i = 0; i < iblock / 4; i += 4) {
+//     for (int k = 0; k < kblock; k++) {
+//       for (int ii = 0; ii < 4; ii++) {
+//         X1[i][k][ii] = X[k + (_x + ii) * nx];
+//       }
+//     }
+//   }
+// }
 
 // void correlate_vec_register(int ny, int nx, const float *data, float
 // *result)

@@ -17,8 +17,8 @@ This is the function you need to implement. Quick reference:
 //
 int constexpr nv = 4;
 
-int constexpr nr = 4; // right now we make this same size as our vector
-int constexpr nc = 4;
+int constexpr nr = 8;
+int constexpr nc = 4; // right now we make this same size as our vector
 
 int constexpr jblock = nc * 10;
 int constexpr iblock = nr * 32;
@@ -57,12 +57,13 @@ static inline double reduce_d4t(double4_t x) {
 // update 6x16 submatrix C[x:x+6][y:y+16]
 // using A[x:x+6][l:r] and B[l:r][y:y+16]
 */
-template <int nr, int nc, int kblock>
-void kernel(double *result, double const *X, int _x, int _y, int const k0,
+template <int nr, int nc, int kblock, class res_type>
+void kernel(res_type *result, double const *X, int _x, int _y, int const k0,
             int const nx, int const ny) {
 
   // C[nc][nr] make it column-major
-  __m256d C[nr]{};
+  __m256d C[nc][nr / 4]{};
+  int constexpr nv_per_column = nr / 4;
 
   int const kend = std::min(k0 + kblock, nx);
 
@@ -93,13 +94,15 @@ void kernel(double *result, double const *X, int _x, int _y, int const k0,
   // __m256d c_col;
 
   for (int k = 0; k < kblock; ++k) {
-    a_col = _mm256_loadu_pd(&A[k][0]);
-    // c_col = _mm256_setzero_pd();
-    for (int j = 0; j < nc; ++j) {
-      b_col = _mm256_broadcast_sd(&B[k][j]);
-      C[j] = _mm256_fmadd_pd(a_col, b_col, C[j]);
+    for (int rb = 0; rb < nv_per_column; ++rb) {
+      a_col = _mm256_loadu_pd(&A[k][rb * 4]);
+      // c_col = _mm256_setzero_pd();
+      for (int j = 0; j < nc; ++j) {
+        b_col = _mm256_broadcast_sd(&B[k][j]);
+        C[j][rb] = _mm256_fmadd_pd(a_col, b_col, C[j][rb]);
+      }
+      // _mm256_store_pd(&C[j][0], c_col);
     }
-    // _mm256_store_pd(&C[j][0], c_col);
   }
 
   // store C
@@ -109,11 +112,27 @@ void kernel(double *result, double const *X, int _x, int _y, int const k0,
   //   }
   //   // _mm256_storeu_pd(&result[_x + (_y + j) * ny], C[j]);
   // }
-  double temp[4] = {};
+  // for (int i = 0; i < std::min(nr, ny - _x); ++i) {
+  //   double temp[nc] = {};
+  //   _mm256_storeu_pd(temp, C[i]);
+
+  //   for (int j = 0; j < std::min(nc, ny - _y); ++j) {
+  //     result[(_x + i) + (_y + j) * ny] += temp[j];
+  //   }
+  // }
+
   for (int j = 0; j < std::min(nc, ny - _y); ++j) {
-    _mm256_storeu_pd(temp, C[j]);
-    for (int i = 0; i < std::min(nr, ny - _x); ++i) {
-      result[(_x + i) + (_y + j) * ny] += temp[i];
+    for (int rb = 0; rb < nv_per_column; ++rb) {
+      double temp[4] = {}; // Fixed size to 4 instead of nc
+      _mm256_storeu_pd(temp, C[j][rb]);
+
+      for (int i_offset = 0;
+           i_offset < 4 && rb * 4 + i_offset < std::min(nr, ny - _x);
+           ++i_offset) {
+        int i = rb * 4 + i_offset;
+        result[(_x + i) + (_y + j) * ny] +=
+            temp[i_offset]; // Use i_offset instead of i % 4
+      }
     }
   }
 
@@ -198,10 +217,6 @@ void correlate(int ny, int nx, const float *data, float *result) {
   //     }
   //   }
 
-  // block loop over j
-
-  // double4_t X1[iblock / 4][kblock]{}, X2[jblock / 4][kblock]{};
-
 // break up the X_jk into blocks of rows
 #pragma omp parallel for schedule(dynamic)
   for (int j = 0; j < ny; j += jblock) {
@@ -217,7 +232,6 @@ void correlate(int ny, int nx, const float *data, float *result) {
           for (int ii = i; ii < std::min(ny, i + iblock); ii += nr) {
             kernel<nr, nc, kblock>(result_d.data(), X.data(), ii, jj, k, nx,
                                    ny);
-            // kernel(result, X.data(), ii, jj, k, kend, nx, ny);
           }
         }
       }
@@ -230,21 +244,10 @@ void correlate(int ny, int nx, const float *data, float *result) {
   }
 }
 
-// template <int iblock, int kblock>
-// void pack_X1(double4_t *X1, double const *X, int const _x, int const _y,
-//              int const k0, int const kend, int const nx, int const ny) {
-//   for (int i = 0; i < iblock / 4; i += 4) {
-//     for (int k = 0; k < kblock; k++) {
-//       for (int ii = 0; ii < 4; ii++) {
-//         X1[i][k][ii] = X[k + (_x + ii) * nx];
-//       }
-//     }
-//   }
-// }
+// void correlate(int ny, int nx, const float *data, float *result) {
+//   int constexpr nb = 4;
+//   int constexpr nd = 8;
 
-// void correlate_vec_register(int ny, int nx, const float *data, float
-// *result)
-// {
 //   // Calculate the number of vectors we'll need for each row
 //   int na = (nx + nb - 1) / nb;
 

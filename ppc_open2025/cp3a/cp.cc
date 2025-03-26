@@ -8,10 +8,13 @@ This is the function you need to implement. Quick reference:
 */
 #include <array>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <immintrin.h>
+#include <iostream>
 #include <vector>
+
 //
 // User defined constants
 //
@@ -21,7 +24,7 @@ int constexpr nr = 8;
 int constexpr nc = 4; // right now we make this same size as our vector
 
 int constexpr jblock = nc * 10;
-int constexpr iblock = nr * 32;
+int constexpr iblock = nr * 16;
 int constexpr kblock = 32;
 
 static_assert(iblock % 4 == 0);
@@ -160,6 +163,8 @@ void kernel(res_type *result, double const *X, int _x, int _y, int const k0,
 
 void correlate(int ny, int nx, const float *data, float *result) {
 
+  auto setup_start = std::chrono::high_resolution_clock::now();
+
   // copy the data to padded vector array
   // std::vector<double4_t> X(ncd * na, d4zero);
   std::vector<double> X(ny * nx, 0);
@@ -201,6 +206,12 @@ void correlate(int ny, int nx, const float *data, float *result) {
       X[x + y * nx] /= norm;
     }
   }
+
+  auto setup_end = std::chrono::high_resolution_clock::now();
+  auto setup_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+      setup_end - setup_start);
+  std::cout << "Setup time: " << setup_duration.count() << " milliseconds"
+            << std::endl;
 
   // compute XX^T
   // C_ij = sum_k X_ik * X_jk

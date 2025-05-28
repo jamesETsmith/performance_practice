@@ -61,7 +61,7 @@ template <class mds_t> void qr_mgs(mds_t A, mds_t Q, mds_t R) {
   std::copy(A.data_handle(), A.data_handle() + A.size(), Q.data_handle());
 
   for (size_t i = 0; i < n; ++i) {
-    R[i, i] = col_norm(A, i);
+    R[i, i] = col_norm(Q, i);
 
     for (size_t j = 0; j < n; ++j) {
       Q[j, i] /= R[i, i];

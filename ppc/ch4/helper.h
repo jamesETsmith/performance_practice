@@ -7,8 +7,8 @@
 #include <cstdlib>
 #include <iostream>
 
-void fill_matrix(float** f, int size) {
-  *f = (float*)malloc(size * sizeof(float));
+void fill_matrix(float **f, int size) {
+  *f = (float *)malloc(size * sizeof(float));
   srand(0);
 
   for (int i = 0; i < size; i++) {
@@ -16,7 +16,7 @@ void fill_matrix(float** f, int size) {
   }
 }
 
-static inline void check(cudaError_t err, const char* context) {
+static inline void check(cudaError_t err, const char *context) {
   if (err != cudaSuccess) {
     std::cerr << "CUDA error: " << context << ": " << cudaGetErrorString(err)
               << std::endl;
@@ -30,14 +30,14 @@ static inline int divup(int a, int b) { return (a + b - 1) / b; }
 
 static inline int roundup(int a, int b) { return divup(a, b) * b; }
 
-__global__ void mykernel(float* r, const float* d, int n);
+__global__ void mykernel(float *r, const float *d, int n);
 
-void step(float* r, const float* d, int n) {
+void step(float *r, const float *d, int n) {
   // Allocate memory & copy data to GPU
-  float* dGPU = NULL;
-  CHECK(cudaMalloc((void**)&dGPU, n * n * sizeof(float)));
-  float* rGPU = NULL;
-  CHECK(cudaMalloc((void**)&rGPU, n * n * sizeof(float)));
+  float *dGPU = NULL;
+  CHECK(cudaMalloc((void **)&dGPU, n * n * sizeof(float)));
+  float *rGPU = NULL;
+  CHECK(cudaMalloc((void **)&rGPU, n * n * sizeof(float)));
   CHECK(cudaMemcpy(dGPU, d, n * n * sizeof(float), cudaMemcpyHostToDevice));
 
   // Run kernel

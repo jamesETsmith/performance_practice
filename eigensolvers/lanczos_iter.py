@@ -198,7 +198,7 @@ def test_lanczos_batch_tridiag():
 
 
 def test_bench_lanczos_batch(benchmark):
-    N = 1 << 12
+    N = 1 << 10
     batch_size = 10
     A = np.random.rand(batch_size, N, N)
     A = A + A.transpose(0, 2, 1)
@@ -208,12 +208,22 @@ def test_bench_lanczos_batch(benchmark):
     benchmark(lanczos_iter_batch, A, b, max_iter=max(N // 10, 60))
 
 
-def test_bench_lanczos_batch_tridiag(benchmark):
-    N = 1 << 12
+def test_bench_eigh_batch(benchmark):
+    N = 1 << 10
     batch_size = 10
     A = np.random.rand(batch_size, N, N)
     A = A + A.transpose(0, 2, 1)
     A[:, np.arange(N), np.arange(N)] = np.random.rand(batch_size, N)
-    b = np.random.rand(batch_size, N)
 
-    benchmark(lanczos_iter_batch_tridiag, A, b, max_iter=max(N // 10, 60))
+    benchmark(np.linalg.eigh, A)
+
+
+# def test_bench_lanczos_batch_tridiag(benchmark):
+#     N = 1 << 12
+#     batch_size = 10
+#     A = np.random.rand(batch_size, N, N)
+#     A = A + A.transpose(0, 2, 1)
+#     A[:, np.arange(N), np.arange(N)] = np.random.rand(batch_size, N)
+#     b = np.random.rand(batch_size, N)
+
+#     benchmark(lanczos_iter_batch_tridiag, A, b, max_iter=max(N // 10, 60))
